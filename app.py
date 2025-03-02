@@ -1,27 +1,57 @@
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, jsonify, render_template_string
 from flask_cors import CORS
 import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 CORS(app)
 
-# 🔹 URL sumber data anime dari Donghub.vip (bisa diganti dengan scraping)
-ANIME_SOURCE = "https://raw.githubusercontent.com/username/repo/main/anime.json"
-
-# 🔹 Ambil data anime dari sumber (bisa dari JSON lokal atau scraping)
-def get_anime_data():
-    try:
-        response = requests.get(ANIME_SOURCE)
-        return response.json()
-    except:
+# 🔹 Fungsi Scraping Anime dari Donghub.vip
+def scrape_donghub():
+    url = "https://donghub.vip/"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
         return {"anime_list": []}
 
-# 🔹 API untuk mendapatkan data anime
+    soup = BeautifulSoup(response.text, "html.parser")
+    anime_list = []
+
+    for anime in soup.select(".bsx"):
+        title = anime.select_one(".tt").text.strip()
+        link = anime.select_one("a")["href"]
+        thumbnail = anime.select_one("img")["src"]
+
+        # 🔹 Ambil Episode Pertama (Opsional)
+        first_episode = scrape_episodes(link)
+
+        anime_list.append({
+            "title": title,
+            "link": link,
+            "thumbnail": thumbnail,
+            "first_episode": first_episode
+        })
+
+    return {"anime_list": anime_list}
+
+# 🔹 Fungsi Scraping Episode Pertama
+def scrape_episodes(anime_url):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(anime_url, headers=headers)
+    if response.status_code != 200:
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    episode_link = soup.select_one(".eplister li a")["href"] if soup.select_one(".eplister li a") else anime_url
+    return episode_link
+
+# 🔹 API untuk mendapatkan daftar anime dari Donghub.vip
 @app.route("/api/anime", methods=["GET"])
 def anime_api():
-    return jsonify(get_anime_data())
+    return jsonify(scrape_donghub())
 
-# 🔹 Frontend: Menampilkan halaman utama
+# 🔹 Frontend (Tampilan HTML + CSS + JavaScript)
 @app.route("/")
 def home():
     return render_template_string("""
@@ -30,29 +60,21 @@ def home():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Donghub Clone</title>
+        <title>Rief Anime</title>
         <style>
             body { font-family: Arial, sans-serif; background-color: #121212; color: white; text-align: center; }
             .anime-container { display: flex; flex-wrap: wrap; justify-content: center; }
             .anime-card { width: 200px; margin: 10px; background: #1e1e1e; padding: 10px; border-radius: 8px; }
             .anime-card img { width: 100%; border-radius: 5px; }
             .anime-card h3 { font-size: 16px; margin: 10px 0; }
-            .anime-card button { background: #ff6600; color: white; border: none; padding: 5px; cursor: pointer; }
-            .anime-card button:hover { background: #ff4500; }
-            #video-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
-            #video-modal video { width: 90%; max-width: 800px; margin-top: 10%; }
-            #close-btn { color: white; font-size: 30px; position: absolute; top: 10px; right: 20px; cursor: pointer; }
+            .anime-card a { text-decoration: none; color: white; background: #ff6600; padding: 5px; display: block; margin-top: 5px; border-radius: 5px; }
+            .anime-card a:hover { background: #ff4500; }
         </style>
     </head>
     <body>
 
-        <h1>Anime Streaming</h1>
+        <h1>Rief Anime Streaming</h1>
         <div class="anime-container" id="anime-list"></div>
-
-        <div id="video-modal">
-            <span id="close-btn">&times;</span>
-            <video id="anime-video" controls></video>
-        </div>
 
         <script>
             document.addEventListener("DOMContentLoaded", function () {
@@ -66,23 +88,12 @@ def home():
                             card.innerHTML = `
                                 <img src="${anime.thumbnail}" alt="${anime.title}">
                                 <h3>${anime.title}</h3>
-                                <button onclick="playVideo('${anime.video_url}')">Tonton</button>
+                                <a href="${anime.first_episode}" target="_blank">Tonton Episode 1</a>
                             `;
                             animeList.appendChild(card);
                         });
                     })
                     .catch(error => console.error("Gagal mengambil data:", error));
-            });
-
-            function playVideo(url) {
-                let modal = document.getElementById("video-modal");
-                let video = document.getElementById("anime-video");
-                video.src = url;
-                modal.style.display = "block";
-            }
-
-            document.getElementById("close-btn").addEventListener("click", function () {
-                document.getElementById("video-modal").style.display = "none";
             });
         </script>
 
@@ -90,6 +101,6 @@ def home():
     </html>
     """)
 
-# 🔹 Jalankan server
+# 🔹 Jalankan Server Flask
 if __name__ == "__main__":
     app.run(debug=True)
